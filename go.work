@@ -1,0 +1,10 @@
+go 1.22
+
+use (
+	./user-service
+	./media-service
+	./feed-service
+	./messaging-service
+	./notification-service
+	./video-processing-service
+)
