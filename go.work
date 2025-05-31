@@ -1,10 +1,10 @@
 go 1.24.3
 
 use (
-	./user-service
-	./media-service
 	./feed-service
+	./media-service
 	./messaging-service
 	./notification-service
+	./user-service
 	./video-processing-service
 )

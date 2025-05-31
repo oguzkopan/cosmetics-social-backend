@@ -1,10 +1,10 @@
+// cmd/media-service/main.go
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -20,32 +20,45 @@ import (
 	"github.com/oguzkopan/cosmetics-social-backend/shared/events"
 )
 
+/* ────── env vars ─────────────────────────────────────────────────────────── */
+
 var (
 	projectID = mustEnv("GOOGLE_CLOUD_PROJECT")
 	port      = "8080"
 
-	// env specific to this service
-	bucket     = mustEnv("MEDIA_BUCKET")      // "<project>.appspot.com"
-	postTopic  = mustEnv("POST_EVENTS_TOPIC") // "post-events"
-	signerSA   = mustEnv("SERVICE_ACCOUNT_EMAIL")
-	signerKey  = mustEnv("SERVICE_ACCOUNT_KEY_PATH")
+	bucket    = mustEnv("MEDIA_BUCKET")      // "<project>.appspot.com"
+	postTopic = mustEnv("POST_EVENTS_TOPIC") // "post-events"
+	signerSA  = mustEnv("SERVICE_ACCOUNT_EMAIL")
+	signerKey = mustEnv("SERVICE_ACCOUNT_KEY_PATH")
 )
 
+/* ────── globals (initialised in main) ────────────────────────────────────── */
+
 var (
-	ctx    context.Context
-	fs     *firestore.Client
-	stor   *storage.Client
-	pubCli *pubsub.Client
+	ctx     context.Context
+	fs      *firestore.Client
+	stor    *storage.Client
+	pubClnt *pubsub.Client
 )
+
+/* ────── main ─────────────────────────────────────────────────────────────── */
 
 func main() {
 	ctx = context.Background()
 
 	var err error
-	if fs, err = firestore.NewClient(ctx, projectID); err != nil { log.Fatal(err) }
-	if stor, err = storage.NewClient(ctx); err != nil { log.Fatal(err) }
-	if err = auth.Init(ctx); err != nil { log.Fatal(err) }
-	if err = events.Init(ctx, projectID); err != nil { log.Fatal(err) }
+	if fs, err = firestore.NewClient(ctx, projectID); err != nil {
+		log.Fatalf("firestore: %v", err)
+	}
+	if stor, err = storage.NewClient(ctx); err != nil {
+		log.Fatalf("storage: %v", err)
+	}
+	if err = auth.Init(ctx); err != nil {
+		log.Fatalf("auth init: %v", err)
+	}
+	if err = events.Init(ctx, projectID); err != nil {
+		log.Fatalf("events init: %v", err)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -58,27 +71,46 @@ func main() {
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
-// POST /posts  – returns {postID, uploadURL}
-func createPost(w http.ResponseWriter, r *http.Request) {
-	author, err := auth.VerifyFirebaseToken(r.Context(), r)
-	if err != nil { http.Error(w, "unauth", http.StatusUnauthorized); return }
+/* ────── handlers ─────────────────────────────────────────────────────────── */
 
-	var req struct{ Caption, MediaType, FileExt string }
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.FileExt == "" {
-		if req.MediaType == "video" { req.FileExt = "mp4" } else { req.FileExt = "jpg" }
+type postRequest struct {
+	Caption   string `json:"caption"`
+	MediaType string `json:"mediaType"` // "image" | "video"
+	FileExt   string `json:"fileExt"`   // optional; jpg/mp4 guessed if empty
+}
+
+func createPost(w http.ResponseWriter, r *http.Request) {
+	authorUID, err := auth.VerifyFirebaseToken(r.Context(), r)
+	if err != nil {
+		http.Error(w, "unauth", http.StatusUnauthorized)
+		return
 	}
 
+	var req postRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.FileExt == "" {
+		if req.MediaType == "video" {
+			req.FileExt = "mp4"
+		} else {
+			req.FileExt = "jpg"
+		}
+	}
+
+	// ── Firestore doc & Signed URL ────────────────────────────────────────
 	postRef := fs.Collection("posts").NewDoc()
-	objPath := fmt.Sprintf("posts/%s/%s.%s", author, postRef.ID, req.FileExt)
+	objPath := fmt.Sprintf("posts/%s/%s.%s", authorUID, postRef.ID, req.FileExt)
 
 	uploadURL, err := signedUploadURL(objPath, 15*time.Minute)
-	if err != nil { http.Error(w, "signed-url err", 500); return }
+	if err != nil {
+		http.Error(w, "signed-url err", http.StatusInternalServerError)
+		return
+	}
 
-	// initial post document (mediaURL added later by video-processing or client)
-	_ = postRef.Set(r.Context(), map[string]any{
+	// initial placeholder document
+	if _, err = postRef.Set(r.Context(), map[string]any{
 		"id":           postRef.ID,
-		"authorID":     author,
+		"authorID":     authorUID,
 		"caption":      req.Caption,
 		"mediaPath":    objPath,
 		"mediaType":    req.MediaType,
@@ -86,10 +118,13 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 		"commentCount": 0,
 		"timestamp":    firestore.ServerTimestamp,
 		"processed":    false,
-	})
+	}); err != nil {
+		http.Error(w, "db write err", http.StatusInternalServerError)
+		return
+	}
 
 	events.Publish(r.Context(), postTopic, "POST_DRAFTED", map[string]string{
-		"postID": postRef.ID, "authorID": author, "object": objPath,
+		"postID": postRef.ID, "authorID": authorUID, "object": objPath,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -99,24 +134,29 @@ func createPost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /posts/{id}
 func getPost(w http.ResponseWriter, r *http.Request) {
-	_, err := auth.VerifyFirebaseToken(r.Context(), r)
-	if err != nil { http.Error(w, "unauth", 401); return }
+	if _, err := auth.VerifyFirebaseToken(r.Context(), r); err != nil {
+		http.Error(w, "unauth", http.StatusUnauthorized)
+		return
+	}
 
-	pid := chi.URLParam(r, "id")
-	doc, err := fs.Collection("posts").Doc(pid).Get(r.Context())
-	if err != nil { http.Error(w, "not found", 404); return }
-
+	docID := chi.URLParam(r, "id")
+	doc, err := fs.Collection("posts").Doc(docID).Get(r.Context())
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(doc.Data())
 }
 
-// ——— helpers ———————————————————————————————————————————————
+/* ────── helpers ─────────────────────────────────────────────────────────── */
 
 func signedUploadURL(object string, ttl time.Duration) (string, error) {
-	keyBytes, err := ioutil.ReadFile(signerKey)
-	if err != nil { return "", err }
+	keyBytes, err := os.ReadFile(signerKey) // ↓ ioutil deprecated
+	if err != nil {
+		return "", err
+	}
 	return storage.SignedURL(bucket, object, &storage.SignedURLOptions{
 		Method:         "PUT",
 		GoogleAccessID: signerSA,
@@ -127,6 +167,8 @@ func signedUploadURL(object string, ttl time.Duration) (string, error) {
 
 func mustEnv(k string) string {
 	v := os.Getenv(k)
-	if v == "" { log.Fatalf("missing env %s", k) }
+	if v == "" {
+		log.Fatalf("missing env %s", k)
+	}
 	return v
 }
