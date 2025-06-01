@@ -7,7 +7,7 @@ require (
 	cloud.google.com/go/pubsub v1.49.0
 	cloud.google.com/go/storage v1.50.0
 	github.com/go-chi/chi/v5 v5.0.10
-	github.com/oguzkopan/cosmetics-social-backend/shared v0.0.0-00010101000000-000000000000
+	github.com/oguzkopan/cosmetics-social-backend/shared v0.1.0
 )
 
 require (

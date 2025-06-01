@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/firestore v1.18.0
 	github.com/go-chi/chi/v5 v5.0.10
 	github.com/go-redis/redis/v8 v8.11.5
-	github.com/oguzkopan/cosmetics-social-backend/shared v0.0.0-20250601062403-b35402800d2c
+	github.com/oguzkopan/cosmetics-social-backend/shared v0.1.0
 )
 
 require (

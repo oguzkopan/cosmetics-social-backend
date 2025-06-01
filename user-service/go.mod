@@ -5,7 +5,7 @@ go 1.24.3
 require (
 	cloud.google.com/go/firestore v1.18.0
 	github.com/go-chi/chi/v5 v5.0.10
-	github.com/oguzkopan/cosmetics-social-backend/shared v0.0.0-00010101000000-000000000000
+	github.com/oguzkopan/cosmetics-social-backend/shared v0.1.0
 )
 
 require (

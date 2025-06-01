@@ -1,8 +1,6 @@
 module github.com/oguzkopan/cosmetics-social-backend/notification-service
 
-go 1.23.0
-
-toolchain go1.24.3
+go 1.24.3
 
 require (
 	cloud.google.com/go/firestore v1.18.0
