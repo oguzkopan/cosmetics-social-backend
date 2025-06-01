@@ -1,0 +1,4 @@
+options:
+  env:
+    - DOCKER_BUILDKIT=1
+    - BUILDKIT_INLINE_CACHE=1       # optional: lets later builds reuse layers
