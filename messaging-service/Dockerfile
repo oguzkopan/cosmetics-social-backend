@@ -5,8 +5,7 @@ WORKDIR /src
 
 # Copy go.mod/go.sum first so the download layer is cached
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download                              # pull deps & write go.sum
+RUN go mod download
 
 # Now copy the rest of the source
 COPY . .
