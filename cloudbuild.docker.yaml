@@ -1,0 +1,10 @@
+# cloudbuild.docker.yaml
+steps:
+- name: gcr.io/cloud-builders/docker
+  #  _SERVICE will be passed as a substitution
+  args: ['build',
+         '-f', '${_SERVICE}-service/Dockerfile',
+         '-t', '${_IMAGE}',
+         '.']
+images:
+- '${_IMAGE}'
