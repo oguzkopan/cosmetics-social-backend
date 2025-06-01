@@ -1,10 +1,9 @@
-# cloudbuild.docker.yaml
+# cloudbuild.docker.yaml  (replace the args section only)
 steps:
 - name: gcr.io/cloud-builders/docker
-  #  _SERVICE will be passed as a substitution
   args: ['build',
          '-f', '${_SERVICE}-service/Dockerfile',
          '-t', '${_IMAGE}',
-         '.']
+         '${_SERVICE}-service' ]          #  ←  context = service dir
 images:
 - '${_IMAGE}'
